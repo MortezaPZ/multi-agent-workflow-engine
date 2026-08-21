@@ -1,20 +1,22 @@
-# Multi-Agent Workflow Engine
+# موتور گردش‌کار چندعامله (Multi-Agent Workflow Engine)
 
-Several agents with different roles, executed over a dependency graph:
-independent steps run in parallel, failures are retried in isolation, and a
-reviewer can send the run **backwards** to be redrafted.
+*A from-scratch multi-agent orchestration engine (no LangGraph/CrewAI) with parallel execution, bounded revision loops, and full per-step tracing. See below for the Persian write-up.*
 
-That backwards edge is the point. A linear chain of LLM calls is a pipeline; a
-graph that can revisit an earlier step based on a later one's judgement is a
-workflow.
+چند عامل با نقش‌های متفاوت، روی یک گراف وابستگی اجرا می‌شوند: مرحله‌های مستقل
+موازی اجرا می‌شوند، خطاها به‌صورت مجزا دوباره تلاش می‌شوند، و یک عامل «بازبین»
+می‌تواند اجرا را به عقب برگرداند تا دوباره نوشته شود.
 
-**Written from scratch — no LangGraph, no CrewAI.** The scheduling, the
-revision loop, and the tracing are about 300 lines, and the whole thing runs
-with no API key.
+همین یال برگشتی نکته‌ی اصلی است. یک زنجیره‌ی خطی از فراخوانی‌های مدل زبانی
+یک «پایپ‌لاین» است؛ گرافی که می‌تواند بر اساس قضاوت یک مرحله‌ی بعدی به مرحله‌ای
+قبلی برگردد، یک «گردش‌کار» واقعی است.
+
+**کاملاً از صفر نوشته شده — بدون LangGraph، بدون CrewAI.** زمان‌بندی، حلقه‌ی
+بازبینی و ردیابی (tracing) روی هم حدود ۳۰۰ خط کدند، و کل سیستم بدون هیچ
+کلید API قابل اجراست.
 
 ---
 
-## The pipeline
+## پایپ‌لاین
 
 ```
 retrieve ─┐
@@ -23,20 +25,20 @@ outline  ─┘                 ↑              │
                             └── revise ────┘   (bounded by max_revisions)
 ```
 
-| Step | Agent | Does |
+| مرحله | عامل | کار |
 |---|---|---|
-| `retrieve` | tool | Searches the corpus — no model call |
-| `outline` | LLM | Plans the report's sections |
-| `analyse` | LLM | Extracts findings from retrieved passages only |
-| `draft` | LLM | Writes the report from findings + outline |
-| `review` | LLM | Grades against a checklist; approves or sends back |
+| `retrieve` | ابزار | جست‌وجو در مجموعه‌ی اسناد — بدون فراخوانی مدل |
+| `outline` | LLM | طرح‌ریزی بخش‌های گزارش |
+| `analyse` | LLM | استخراج یافته‌ها فقط از قطعه‌های بازیابی‌شده |
+| `draft` | LLM | نوشتن گزارش از روی یافته‌ها + طرح |
+| `review` | LLM | نمره‌دهی طبق چک‌لیست؛ تأیید یا برگشت |
 
-`retrieve` and `outline` do not depend on each other, so the engine puts them in
-the same layer and runs them concurrently.
+`retrieve` و `outline` به هم وابسته نیستند، پس موتور آن‌ها را در یک لایه قرار
+می‌دهد و هم‌زمان اجرا می‌کند.
 
 ---
 
-## What a run looks like
+## یک اجرای نمونه
 
 ```
 $ python demo.py
@@ -67,130 +69,130 @@ total: 3489 tokens in 3ms
 by agent: {'reviewer': 1587, 'writer': 1534, 'analyst': 307, 'outliner': 61, 'retriever': 0}
 ```
 
-The reviewer rejected a 620-word first draft, the writer saw that feedback and
-produced 85 words, and the second review passed. The irrelevant corpus entry
-(an office memo) never made it into retrieval.
+عامل بازبین یک پیش‌نویس ۶۲۰ کلمه‌ای اول را رد کرد، عامل نویسنده آن بازخورد را
+دید و نسخه‌ی ۸۵ کلمه‌ای تولید کرد، و بازبینی دوم تأیید شد. سند بی‌ربط مجموعه
+(یک یادداشت اداری) هرگز وارد بازیابی نشد.
 
 ---
 
-## Quick start
+## شروع سریع
 
 ```bash
 python -m venv .venv
 .venv/Scripts/activate            # source .venv/bin/activate on Linux/macOS
 pip install -r requirements.txt
 
-python demo.py                          # full run with trace
-pytest tests -q                         # 59 tests
-uvicorn workflow.api:app --reload       # API on http://localhost:8000
+python demo.py                          # اجرای کامل با ردیابی
+pytest tests -q                         # ۵۹ آزمون
+uvicorn workflow.api:app --reload       # API روی http://localhost:8000
 ```
 
-No API key needed. Set `ANTHROPIC_API_KEY` to swap the scripted backend for
-Claude — the orchestration code does not change.
+نیازی به کلید API نیست. با تنظیم `ANTHROPIC_API_KEY` می‌توانید backend اسکریپتی
+را با Claude جایگزین کنید — کد ارکستراسیون هیچ تغییری نمی‌کند.
 
 ---
 
 ## API
 
-| Method | Endpoint | Purpose |
+| متد | مسیر | هدف |
 |---|---|---|
-| `GET` | `/health` | Active backend and registered tools |
-| `GET` | `/workflow` | The graph: steps, dependencies, execution layers |
-| `POST` | `/run` | Run the workflow; returns the report **and the full trace** |
+| `GET` | `/health` | backend فعال و ابزارهای ثبت‌شده |
+| `GET` | `/workflow` | خود گراف: مراحل، وابستگی‌ها، لایه‌های اجرا |
+| `POST` | `/run` | اجرای گردش‌کار؛ گزارش **و ردیابی کامل** را برمی‌گرداند |
 
-`/workflow` exists so a caller can inspect the shape before committing to a
-run, and `/run` returns the per-step trace alongside the result — a workflow you
-cannot see inside of is one you cannot debug.
-
----
-
-## Engine features
-
-**Layered parallel execution.** Steps are topologically sorted into layers;
-every step in a layer is independent of the others, so the layer runs on a
-thread pool. Cycles and unknown dependencies are caught when the graph is built,
-not halfway through a run.
-
-**Bounded revision loops.** A step returns `Revision(target, feedback)` to send
-the run back. The engine rewinds to that step's layer, clears the outputs that
-are about to be recomputed, and puts the feedback on the blackboard so the
-retried step sees *why*. `max_revisions` caps it — without that, a reviewer that
-never approves loops forever.
-
-**Retries that isolate failure.** A step that raises is retried up to
-`max_attempts`. Every attempt is traced, including the failures. If all attempts
-fail nothing is written under the step's output key, so dependents see a missing
-key rather than a half-built value.
-
-**Write-once shared state.** The blackboard is thread-safe and rejects a second
-write to the same key, which turns "two steps claim the same output" from a
-silent race into an immediate error.
-
-**Tracing.** Per step: status, attempt number, duration, tokens. Per run: total
-spend, tokens by agent, retry counts. "Which agent burned the budget" is a
-question a multi-agent system gets asked constantly.
+`/workflow` برای این وجود دارد که فراخواننده بتواند قبل از تعهد به یک اجرا،
+شکل گراف را بررسی کند، و `/run` ردیابی مرحله‌به‌مرحله را همراه نتیجه برمی‌گرداند
+— گردش‌کاری که نتوان داخلش را دید، قابل دیباگ‌کردن هم نیست.
 
 ---
 
-## Design decisions worth explaining
+## قابلیت‌های موتور
 
-**Agents are thin; the engine owns control flow.** An agent renders a prompt,
-calls the backend, returns a result. Ordering, retries, and revision live in the
-engine. That keeps agents unit-testable and means the same agent works in a
-different graph without modification.
+**اجرای موازی لایه‌ای.** مراحل به‌صورت توپولوژیک در لایه‌ها مرتب می‌شوند؛ هر
+مرحله در یک لایه از بقیه مستقل است، پس آن لایه روی یک thread pool اجرا می‌شود.
+حلقه‌ها و وابستگی‌های ناشناخته هنگام ساخت گراف کشف می‌شوند، نه در وسط اجرا.
 
-**Reviewer parsing fails closed.** Models wrap JSON in prose or fences, so the
-verdict parser extracts the first JSON object rather than requiring a bare one,
-and falls back to looking for an explicit approval word. When it cannot tell,
-it withholds approval — a garbled reviewer must never auto-pass a draft.
+**حلقه‌های بازبینی محدود.** یک مرحله با برگرداندن `Revision(target, feedback)`
+اجرا را به عقب می‌فرستد. موتور به لایه‌ی همان مرحله برمی‌گردد، خروجی‌هایی که
+قرار است دوباره محاسبه شوند را پاک می‌کند، و بازخورد را روی blackboard می‌گذارد
+تا مرحله‌ی دوباره‌اجراشده «چرا» را ببیند. `max_revisions` سقف آن است — بدون
+آن، یک بازبین که هرگز تأیید نمی‌کند بی‌نهایت حلقه می‌زند.
 
-**Prompts are joined, not dedented.** Interpolating multi-line content into a
-`textwrap.dedent` block leaves the first line indented and the rest flush, so
-dedent finds no common prefix and silently does nothing. This broke
-line-anchored parsing during development; prompts are now assembled by joining
-lines.
+**تلاش‌های مجدد که خطا را ایزوله می‌کنند.** مرحله‌ای که خطا بدهد تا
+`max_attempts` بار دوباره تلاش می‌شود. هر تلاش، حتی خطاها، ردیابی می‌شود. اگر
+همه‌ی تلاش‌ها شکست بخورند، چیزی زیر کلید خروجی آن مرحله نوشته نمی‌شود، پس
+مراحل وابسته یک کلید غایب می‌بینند نه یک مقدار نیمه‌ساخته.
 
-**Tool steps sit in the same graph as LLM steps.** Retrieval is a tool call, not
-a model call, and costs zero tokens — but it still gets retries, tracing, and
-dependency ordering.
+**حافظه‌ی مشترک تک‌نوشت.** blackboard thread-safe است و نوشتن دوم روی یک کلید
+را رد می‌کند — این «دو مرحله ادعای یک خروجی را دارند» را از یک race خاموش به
+یک خطای فوری تبدیل می‌کند.
+
+**ردیابی.** برای هر مرحله: وضعیت، شماره‌ی تلاش، مدت‌زمان، تعداد توکن. برای هر
+اجرا: هزینه‌ی کل، توکن به تفکیک عامل، تعداد تلاش مجدد. «کدام عامل بودجه را
+سوزانده» سؤالی‌ست که یک سیستم چندعامله مدام باید جوابش را بدهد.
 
 ---
 
-## Tests
+## تصمیم‌های طراحی که ارزش توضیح دارند
 
-59 tests across the engine and pipeline:
+**عامل‌ها سبک‌اند؛ کنترل جریان دست موتور است.** یک عامل یک پرامپت می‌سازد،
+backend را فرا می‌خواند، نتیجه را برمی‌گرداند. ترتیب، تلاش مجدد و بازبینی در
+موتور زندگی می‌کنند. این باعث می‌شود عامل‌ها قابل تست واحد باقی بمانند و همان
+عامل بدون تغییر در گراف دیگری هم کار کند.
 
-| Area | Covers |
+**پارس بازبین در برابر خطا بسته می‌شود (fail closed).** مدل‌ها گاهی JSON را در
+متن یا فنس می‌پیچند، پس پارسر رأی، اولین شیء JSON را استخراج می‌کند به‌جای
+نیاز به JSON خالص، و اگر نتوانست، دنبال یک کلمه‌ی تأیید صریح می‌گردد. وقتی
+نتواند تشخیص دهد، تأیید را نگه می‌دارد — یک بازبین درهم‌ریخته هرگز نباید
+خودکار یک پیش‌نویس را قبول کند.
+
+**پرامپت‌ها join می‌شوند، نه dedent.** قراردادن محتوای چندخطی داخل یک بلوک
+`textwrap.dedent` باعث می‌شود خط اول تورفته بماند و بقیه راست‌چین شوند، پس
+dedent هیچ پیشوند مشترکی پیدا نمی‌کند و بی‌سروصدا کاری نمی‌کند. همین مسئله
+هنگام توسعه پارس مبتنی‌بر خط را خراب کرد؛ الان پرامپت‌ها با join‌کردن خطوط
+ساخته می‌شوند.
+
+**مراحل ابزاری در همان گراف مراحل LLM قرار دارند.** بازیابی یک فراخوانی ابزار
+است نه فراخوانی مدل، و هزینه‌ی توکن صفر دارد — اما همچنان تلاش مجدد، ردیابی و
+ترتیب وابستگی دارد.
+
+---
+
+## آزمون‌ها
+
+۵۹ آزمون روی موتور و پایپ‌لاین:
+
+| بخش | پوشش می‌دهد |
 |---|---|
-| Blackboard | write-once, missing keys, concurrent writes |
-| Topology | layering, cycles, unknown deps, duplicate names |
-| Execution | parallelism (timed), retries, isolation, conditions |
-| Revision loop | rerun, feedback delivery, revision cap, bad target |
-| Tools | registry, validation, error messages |
-| Agents | prompts, parsing, usage, review verdicts |
-| Verdict parsing | bare JSON, fenced JSON, prose, unparsable |
-| Pipeline | end-to-end, retrieval filtering, loop actually fires |
-| API | health, graph description, run, validation |
+| Blackboard | تک‌نوشت‌بودن، کلیدهای غایب، نوشتن هم‌زمان |
+| توپولوژی | لایه‌بندی، حلقه‌ها، وابستگی ناشناخته، نام تکراری |
+| اجرا | موازی‌سازی (زمان‌سنجی‌شده)، تلاش مجدد، ایزوله‌سازی، شرط‌ها |
+| حلقه‌ی بازبینی | اجرای دوباره، رسیدن بازخورد، سقف بازبینی، هدف نامعتبر |
+| ابزارها | ثبت‌نام، اعتبارسنجی، پیام خطا |
+| عامل‌ها | پرامپت، پارس، مصرف، رأی بازبینی |
+| پارس رأی | JSON خالص، JSON فنس‌شده، متن آزاد، غیرقابل‌پارس |
+| پایپ‌لاین | سرتاسری، فیلتر بازیابی، اجرای واقعی حلقه |
+| API | سلامت، توصیف گراف، اجرا، اعتبارسنجی |
 
 ---
 
-## Layout
+## ساختار
 
 ```
 agent-workflow/
 ├── workflow/
-│   ├── state.py       # thread-safe write-once blackboard
-│   ├── llm.py         # backend protocol: scripted / Claude
-│   ├── tools.py       # tool registry with argument validation
+│   ├── state.py       # blackboard تک‌نوشت thread-safe
+│   ├── llm.py         # پروتکل backend: scripted / Claude
+│   ├── tools.py       # ثبت ابزار با اعتبارسنجی آرگومان
 │   ├── agents.py      # Agent, ToolAgent, ReviewAgent
-│   ├── graph.py       # topological layers, parallel exec, retries, revision
-│   ├── tracing.py     # per-step and per-run trace
-│   ├── pipelines.py   # the concrete research-and-report workflow
-│   └── api.py         # FastAPI layer
+│   ├── graph.py       # لایه‌های توپولوژیک، اجرای موازی، تلاش مجدد، بازبینی
+│   ├── tracing.py     # ردیابی هر مرحله و هر اجرا
+│   ├── pipelines.py   # گردش‌کار مشخص تحقیق-و-گزارش
+│   └── api.py         # لایه‌ی FastAPI
 ├── tests/test_workflow.py
 └── demo.py
 ```
 
-## License
+## مجوز
 
 MIT
